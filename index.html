@@ -467,47 +467,59 @@
     // Function to build data structure for KML (MODIFIED for desired description)
     // Function to build data structure for KML (MODIFIED for desired description)
   function buildDataForKML() {
-    if (!generatedPoints || generatedPoints.length === 0) { return null; }
-    if (!svgGroup) { return null; }
+  // Bail out if there’s nothing to export
+  if (!generatedPoints.length || !svgGroup) return null;
 
-    const features = [];
-    generatedPoints.forEach((point, index) => {
-        const latLng = _getTransformedLatLng(point);
-        if (latLng) {
-            // Create the feature object that tokml will process
-            const feature = {
-                // Set 'name' property - tokml maps this to KML <name>
-                name: (index + 1).toString(), // Keep name as the number (or change to "Point N" if preferred)
+  // Convert each generated SVG point into a GeoJSON-style Feature
+  const features = generatedPoints.map((pt, i) => {
+    const ll = _getTransformedLatLng(pt);
+    return {
+      // Google My Maps will display this <name> value
+      name: (i + 1).toString(),
 
-                // Set 'description' property - tokml maps this to KML <description>
-                description: (index + 1).toString(), // *** THIS IS THE KEY CHANGE ***
+      geometry: {
+        type: "Point",
+        coordinates: [ ll.lng, ll.lat ]
+      }
+    };
+  });
 
-                // Geometry is still required by tokml
-                geometry: {
-                    type: "Point",
-                    coordinates: [latLng.lng, latLng.lat]
-                }
-                // We no longer need the nested 'properties' object for this simple KML structure,
-                // unless you specifically want the <ExtendedData> tags as well.
-                // If you DON'T want <ExtendedData>, remove the 'properties' block below.
-                /*
-                properties: {
-                    index: index + 1,
-                    sourceIndex: point.sourceIndex,
-                    sourceId: point.sourceId,
-                    sourceTag: point.sourceTag
-                }
-                */
-            };
-            features.push(feature);
-        }
-    });
+  // Wrap in a FeatureCollection for tokml
+  return {
+    type: "FeatureCollection",
+    features: features
+  };
+}
 
-    if (features.length === 0 && generatedPoints.length > 0) { return null; }
-
-    // Return the FeatureCollection structure tokml expects
-    return { type: "FeatureCollection", features: features };
+function exportKML() {
+  const geojson = buildDataForKML();
+  if (!geojson) {
+    alert("No point data to export.");
+    return;
   }
+
+  // Tell tokml to use each feature’s "name" property for the KML <name>
+  const kmlString = tokml(geojson, {
+    name: 'name',
+    description: ''    // leave blank—My Maps ignores <description> anyway
+  });
+
+  // Create and click a download link
+  const blob = new Blob([kmlString], {
+    type: "application/vnd.google-earth.kml+xml"
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = "svg_points.kml";
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+
+  console.log("KML export complete.");
+}
+
   function exportKML() { /* ... */ }
    // Explicitly copy implementation from previous working version
    buildDataForKML = function() {
