@@ -93,8 +93,7 @@
   "use strict";
 
   // --- Configuration ---
-  const SVG_PATH_TO_LOAD = './svg/11-52.svg'; // Path to your SVG file
-
+  const SVG_PATH_TO_LOAD = './svg/11-52.svg'; 
   // Globals & constants
   const POINT_MARKER_OPTIONS = { radius: 3, color: 'red', fillColor: '#f03', fillOpacity: 0.8, weight: 1 };
   const MAX_POINTS_PER_PATH = 20000;
@@ -168,7 +167,7 @@
     L.control.scale({ imperial: false }).addTo(map);
   }
 
-  // MODIFIED updateUI for new state management
+  // updateUI for new state management
   function updateUI() {
     const svgPlaced = !!svgLayer; // Check if the layer exists on the map
     const hasGeneratedPoints = generatedPoints.length > 0;
@@ -190,7 +189,7 @@
 
   // 4️⃣ SVG Loading and Processing (Split)
 
-  // NEW function: Processes the loaded SVG text - DOES NOT place it
+  // Processes the loaded SVG text - DOES NOT place it
   function processLoadedSVGData(svgText) {
      console.log("Processing loaded SVG data...");
      try {
@@ -235,7 +234,7 @@
   }
 
 
-  // MODIFIED: Loads SVG but calls processor instead of placer
+  // Loads SVG but calls processor instead of placer
   async function loadAndProcessSVG(svgPath) {
     isSvgDataLoaded = false; // Reset flag
     loadedSvgText = null;
@@ -277,7 +276,7 @@
   };
   // End explicit copy
 
-  // 6️⃣ Get Distance Parameters (no changes needed, reads from UI when called)
+  // 6️⃣ Get Distance Parameters 
   function getDistanceParams() { /* ... */ }
    // Explicitly copy implementation from previous working version
    getDistanceParams = function() {
