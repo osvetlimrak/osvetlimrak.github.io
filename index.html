@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>SVG Overlay Point Generator - KML Export</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body {
+      margin: 0; padding: 0;
+      width: 100%; height: 100%;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+      display: flex; flex-direction: column;
+    }
+    #map {
+      width: 100%; flex-grow: 1; min-height: 200px;
+      position: relative;
+    }
+    #controls {
+      padding: 12px; background: #f4f4f4; border-top: 1px solid #ccc;
+      overflow-y: auto; max-height: 40%;
+      flex-shrink: 0;
+    }
+    .control-group {
+      margin-bottom: 10px; padding-bottom: 10px;
+      border-bottom: 1px dashed #ddd;
+    }
+    .control-group:last-child {
+      border-bottom: none; margin-bottom: 0; padding-bottom: 0;
+    }
+    .control-group > label:first-child {
+      font-weight: bold; display: block; margin-bottom: 5px;
+    }
+    #controls label, #controls button, #controls input[type="number"] { /* Grouped for simplicity */
+      display: inline-block; margin: 5px 8px 5px 0; vertical-align: middle;
+    }
+    #controls input[type="number"] {
+      width: 65px; padding: 4px 6px; border: 1px solid #ccc; border-radius: 3px; margin-left: 2px;
+    }
+    /* Style for the custom layer container */
+    .my-svg-layer {
+       pointer-events: none;
+    }
+    /* Style for the SVG element itself within the layer */
+    .my-svg-layer svg {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: auto;
+      user-select: none;
+      overflow: visible;
+      cursor: grab;
+    }
+    .my-svg-layer svg:active { cursor: grabbing; }
+    #svg-content-group {}
+  </style>
+</head>
+<body>
+
+  <div id="map"></div>
+
+  <div id="controls">
+    <!-- SVG Upload section removed -->
+
+    <div class="control-group">
+      <label>1. Point Spacing:</label> <!-- Renumbered step -->
+      <!-- Variable/Single radio buttons and Variable inputs removed -->
+      <div> <!-- Keep a div for consistency if needed, or remove if singleDist is directly in control-group -->
+        <label for="singleDist">Distance (m):</label>
+        <input type="number" id="singleDist" value="1" min="0.1" step="0.1"> <!-- Default to 1m -->
+      </div>
+    </div>
+
+    <div class="control-group">
+      <label>2. Generate & Export:</label> <!-- Renumbered step -->
+      <button id="btnGeneratePoints" disabled>Generate Points on SVG</button>
+      <!-- Export GeoJSON button removed -->
+      <button id="btnExportKML" disabled>Export KML</button>
+    </div>
+
+    <div class="control-group">
+      <label>3. Adjust SVG:</label> <!-- Renumbered step -->
+      <button id="btnRotateLeft" disabled>Rotate Left (-10°)</button>
+      <button id="btnRotateRight" disabled>Rotate Right (+10°)</button>
+      <button id="btnScaleUp" disabled>Scale Up (x1.1)</button>
+      <button id="btnScaleDown" disabled>Scale Down (x0.9)</button>
+    </div>
+  </div>
+  
+    <!-- Dependencies -->
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@svgdotjs/svg.js@3.1.2/dist/svg.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@svgdotjs/svg.draggable.js@3.0.2/dist/svg.draggable.min.js"></script>
+  <script src="./js/libs/svg-path-properties.js"></script> <!-- Ensure this path is correct -->
+  <script src="https://cdn.jsdelivr.net/npm/tokml@0.4.0/tokml.min.js"></script>
+
+  <script>
+  "use strict";
+
+  // --- Configuration ---
+  const SVG_PATH_TO_LOAD = './svg/11-52.svg'; // Path to your SVG file
+
+  // Globals & constants
+  const POINT_MARKER_OPTIONS = {
+    radius: 3, color: 'red', fillColor: '#f03',
+    fillOpacity: 0.8, weight: 1
+  };
+  const MAX_POINTS_PER_PATH = 20000;
+
+  let map, svgLayer, svgRoot, svgGroup;
+  let userPathElements = [], generatedPoints = [], pointMarkers = [];
+  let localSVGWidth = 300, localSVGHeight = 300;
+  let currentRotation = 0, currentScale = 1;
+  let SvgPathPropertiesConstructor = null;
+
+  // 1️⃣ Dependency check (no changes from your previous version)
+  function checkDependencies() {
+    let ok = true;
+    if (typeof L === 'undefined') { alert("Leaflet library (L) is missing!"); ok = false; }
+    if (typeof SVG === 'undefined') { alert("svg.js library (SVG) is missing!"); ok = false; }
+    if (typeof SVG.extend === 'function' && typeof SVG.Element !== 'undefined' && typeof SVG.Element.prototype.draggable !== 'function') {
+         alert("svg.draggable.js extension for svg.js is missing or not loaded correctly!");
+    }
+    if (typeof svgPathProperties === 'undefined') {
+      alert("svg-path-properties library is missing!"); ok = false;
+    } else {
+      SvgPathPropertiesConstructor =
+        typeof svgPathProperties === 'function' ? svgPathProperties
+        : (typeof svgPathProperties === 'object' && typeof svgPathProperties.svgPathProperties === 'function' ? svgPathProperties.svgPathProperties
+        : (typeof svgPathProperties === 'object' && typeof svgPathProperties.default === 'function' ? svgPathProperties.default
+        : null));
+      if (typeof SvgPathPropertiesConstructor !== 'function') {
+        console.error("svg-path-properties object found, but constructor function not identified:", svgPathProperties);
+        alert("Could not find the svg-path-properties constructor function. Check console for details.");
+        ok = false;
+      }
+    }
+     if (typeof tokml === 'undefined') { alert("tokml library is missing!"); ok = false; }
+    return ok;
+  }
+
+  // 2️⃣ Custom SVG overlay Layer for Leaflet (no changes from your previous version)
+  const CustomSvgLayer = L.Layer.extend({
+    initialize: function(svgElement, bounds, options) {
+      this._svgElement = svgElement;
+      this._bounds = L.latLngBounds(bounds);
+      L.setOptions(this, options);
+    },
+    onAdd: function(map) {
+      this._map = map;
+      if (!this._container) {
+          this._container = L.DomUtil.create('div', 'my-svg-layer leaflet-zoom-animated');
+          this._container.appendChild(this._svgElement);
+      }
+      map.getPanes().overlayPane.appendChild(this._container);
+      this._update();
+      map.on('zoomend viewreset moveend', this._update, this);
+    },
+    onRemove: function(map) {
+      if (this._container) {
+        map.getPanes().overlayPane.removeChild(this._container);
+      }
+      map.off('zoomend viewreset moveend', this._update, this);
+      this._container = null; this._map = null;
+    },
+    _update: function() {
+      if (!this._map || !this._bounds || !this._container) { return; }
+      const topLeft = this._map.latLngToLayerPoint(this._bounds.getNorthWest());
+      const bottomRight = this._map.latLngToLayerPoint(this._bounds.getSouthEast());
+      const width = Math.max(0, bottomRight.x - topLeft.x);
+      const height = Math.max(0, bottomRight.y - topLeft.y);
+      L.DomUtil.setPosition(this._container, topLeft);
+      this._container.style.width = width + 'px';
+      this._container.style.height = height + 'px';
+    },
+    setBounds: function(bounds) {
+      this._bounds = L.latLngBounds(bounds);
+      if (this._map) { this._update(); }
+      return this;
+    },
+    getBounds: function() { return this._bounds; }
+  });
+  L.customSvgLayer = function(svgElement, bounds, options) {
+    return new CustomSvgLayer(svgElement, bounds, options);
+  };
+
+  // 3️⃣ Initialize map & UI event listeners
+  function initMap() {
+    map = L.map('map').setView([0, 0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+    L.control.scale({ imperial: false }).addTo(map);
+  }
+
+  // MODIFIED updateUI to reflect removed options
+  function updateUI() {
+    const hasSVG = !!svgLayer && !!svgRoot && userPathElements.length > 0;
+    const hasGeneratedPoints = generatedPoints.length > 0;
+
+    document.getElementById('btnGeneratePoints').disabled = !hasSVG;
+    // GeoJSON button is removed, so no need to manage its state
+    document.getElementById('btnExportKML').disabled = !hasSVG || !hasGeneratedPoints;
+
+    ['btnRotateLeft', 'btnRotateRight', 'btnScaleUp', 'btnScaleDown']
+      .forEach(id => document.getElementById(id).disabled = !hasSVG);
+
+    // Distance mode elements are removed, but singleDist input remains
+    document.getElementById('singleDist').disabled = !hasSVG;
+  }
+
+  // NEW function to load SVG from a predefined path
+  async function loadAndProcessSVG(svgPath) {
+    try {
+        const response = await fetch(svgPath);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status} while fetching ${svgPath}`);
+        }
+        const svgText = await response.text();
+        onSVGUploaded(svgText); // Process the loaded SVG
+    } catch (error) {
+        console.error("Error loading SVG from path:", error);
+        alert(`Failed to load SVG from ${svgPath}. Please check the path and ensure the file exists. \nError: ${error.message}`);
+        // Potentially update UI to reflect failure
+        updateUI();
+    }
+  }
+
+  // MODIFIED DOMContentLoaded
+  document.addEventListener('DOMContentLoaded', () => {
+    if (!checkDependencies()) {
+      alert("One or more required libraries are missing. Please check console.");
+      return;
+    }
+    initMap();
+
+    // --- Load SVG automatically ---
+    loadAndProcessSVG(SVG_PATH_TO_LOAD);
+
+    // --- Button listeners (GeoJSON export listener removed) ---
+    document.getElementById('btnGeneratePoints').addEventListener('click', generatePoints);
+    document.getElementById('btnExportKML').addEventListener('click', exportKML);
+    document.getElementById('btnRotateLeft').addEventListener('click', () => rotateSVG(-10));
+    document.getElementById('btnRotateRight').addEventListener('click', () => rotateSVG(10));
+    document.getElementById('btnScaleUp').addEventListener('click', () => scaleSVG(1.1));
+    document.getElementById('btnScaleDown').addEventListener('click', () => scaleSVG(0.9));
+
+    // Radio button listeners for distance mode are removed as mode is fixed.
+    // No need for event listener on singleDist input unless you want real-time updates,
+    // its value is read when 'Generate Points' is clicked.
+
+    updateUI(); // Initial UI state
+  });
+  </script>
+  <script>
+  // Separating remaining JS logic into another script block
+  
+    // 8️⃣ Draw Point Markers on Map
+  // _getTransformedLatLng (no changes from your previous version)
+  function _getTransformedLatLng(point) {
+      if (!svgRoot || !svgGroup || !map) { return null; }
+      const svgElement = svgRoot.node; const groupNode = svgGroup.node;
+      const screenCTM = groupNode.getScreenCTM();
+      if (!screenCTM) { console.error("No Screen CTM from group."); return null; }
+      const svgPoint = svgElement.createSVGPoint();
+      svgPoint.x = point.x; svgPoint.y = point.y;
+      try {
+          const transformedPoint = svgPoint.matrixTransform(screenCTM);
+          const mapContainerRect = map.getContainer().getBoundingClientRect();
+          const containerX = transformedPoint.x - mapContainerRect.left;
+          const containerY = transformedPoint.y - mapContainerRect.top;
+          return map.containerPointToLatLng([containerX, containerY]);
+      } catch (e) { console.error("Error transforming point:", e, point); return null; }
+  }
+
+  // drawGeneratedPoints (no changes from your previous version)
+  function drawGeneratedPoints() {
+      pointMarkers.forEach(marker => map.removeLayer(marker)); pointMarkers = [];
+      if (!generatedPoints || generatedPoints.length === 0) { return; }
+      if (!svgGroup) { return; }
+      let failedTransforms = 0;
+      generatedPoints.forEach((point, index) => {
+          const latLng = _getTransformedLatLng(point);
+          if (latLng) {
+              const marker = L.circleMarker(latLng, POINT_MARKER_OPTIONS)
+                  .bindTooltip(`Point ${index + 1}<br>Source: ${point.sourceTag} ${point.sourceId}`);
+              marker.addTo(map); pointMarkers.push(marker);
+          } else { failedTransforms++; }
+      });
+      if (failedTransforms > 0) { console.warn(`Failed to draw ${failedTransforms} points.`); }
+  }
+
+  // 9️⃣ Export Functionality (KML only)
+  // buildGeoJSON (REMOVED - Not strictly needed for KML if tokml handles properties directly,
+  // but tokml typically expects GeoJSON. Let's build a simplified internal structure for KML properties)
+
+  // Function to build data structure for KML (simpler than full GeoJSON if only for KML)
+  function buildDataForKML() {
+    if (!generatedPoints || generatedPoints.length === 0) { return null; }
+    if (!svgGroup) { return null; }
+
+    const features = [];
+    generatedPoints.forEach((point, index) => {
+        const latLng = _getTransformedLatLng(point);
+        if (latLng) {
+            features.push({
+                // These are properties tokml will look for based on options
+                name: `Point ${index + 1}`,
+                description: `Source: ${point.sourceTag} ${point.sourceId} (SVG Coords: x=${point.x.toFixed(2)}, y=${point.y.toFixed(2)})`,
+                // Geometry needs to be structured for tokml, even if not full GeoJSON
+                geometry: {
+                    type: "Point",
+                    coordinates: [latLng.lng, latLng.lat]
+                },
+                // Keep original properties if needed for KML extended data
+                properties: { // This 'properties' sub-object is what tokml maps
+                    index: index + 1,
+                    sourceIndex: point.sourceIndex,
+                    sourceId: point.sourceId,
+                    sourceTag: point.sourceTag
+                }
+            });
+        }
+    });
+    if (features.length === 0 && generatedPoints.length > 0) { return null; }
+    // tokml expects a GeoJSON-like FeatureCollection structure
+    return { type: "FeatureCollection", features: features };
+  }
+
+
+  // GeoJSON export function REMOVED:
+  // function exportGeoJSON() { /* ... */ }
+
+
+  // MODIFIED Triggers download of the generated points as a KML file
+  function exportKML() {
+    // Use the new helper function to build data structure
+    const dataForKml = buildDataForKML();
+     if (!dataForKml || !dataForKml.features || dataForKml.features.length === 0) {
+      alert("No point data available to export as KML.");
+      return;
+    }
+
+    if (typeof tokml === 'undefined') {
+         alert("tokml library is not loaded. Cannot export KML.");
+         return;
+     }
+
+    try {
+        // Convert data to KML using tokml library
+        // We'll tell tokml to look for 'name' and 'description' at the top level of each feature
+        const kmlString = tokml(dataForKml, {
+            name: 'name',
+            description: 'description',
+            // If you want to include all properties from the 'properties' sub-object
+            // into <ExtendedData>, you might need to adjust or use a different tokml option
+            // or ensure your 'description' concatenates what you need.
+            // For simplicity, 'name' and 'description' are directly mapped here.
+        });
+
+        const blob = new Blob([kmlString], { type: "application/vnd.google-earth.kml+xml" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = "svg_points.kml";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        console.log("KML export initiated.");
+    } catch (error) {
+         console.error("Error during KML export:", error);
+         alert("An error occurred while creating the KML file.");
+    }
+  }
+  </script>
+</body>
+</html>
