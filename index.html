@@ -492,12 +492,9 @@
 }
 
 function exportKML() {
-  if (!generatedPoints || generatedPoints.length === 0) {
-    alert("No point data to export.");
-    return;
+  if (!generatedPoints.length) {
+    return alert("No point data to export.");
   }
-
-  // --- Build a minimal, My Maps-friendly KML string ---
   let kml = `<?xml version="1.0" encoding="UTF-8"?>\n` +
             `<kml xmlns="http://www.opengis.net/kml/2.2">\n` +
             `  <Document>\n` +
@@ -506,21 +503,21 @@ function exportKML() {
   generatedPoints.forEach((pt, i) => {
     const ll = _getTransformedLatLng(pt);
     if (!ll) return;
-    // i+1 → your point number
-    kml +=
-      `    <Placemark>\n` +
-      `      <name>${i + 1}</name>\n` +
-      `      <Point>\n` +
-      `        <coordinates>${ll.lng},${ll.lat},0</coordinates>\n` +
-      `      </Point>\n` +
-      `    </Placemark>\n`;
+
+    kml += `    <Placemark>\n` +
+           `      <name>${i + 1}</name>\n` +
+           // ← here’s your new description:
+           `      <description>Point Index: ${i + 1}<br/>` +
+           `Source: ${pt.sourceTag} ${pt.sourceId}` +
+           `</description>\n` +
+           `      <Point>\n` +
+           `        <coordinates>${ll.lng},${ll.lat},0</coordinates>\n` +
+           `      </Point>\n` +
+           `    </Placemark>\n`;
   });
 
-  kml +=
-            `  </Document>\n` +
-            `</kml>`;
+  kml += `  </Document>\n</kml>`;
 
-  // --- Download it ---
   const blob = new Blob([kml], { type: "application/vnd.google-earth.kml+xml" });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement("a");
@@ -531,8 +528,9 @@ function exportKML() {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 
-  console.log("Exported KML with numbered <name> tags.");
+  console.log("Exported KML with descriptions.");
 }
+
 
 
   // Tell tokml to use each feature’s "name" property for the KML <name>
