@@ -64,8 +64,7 @@
 
     <div class="control-group">
       <label>1. Point Spacing:</label> <!-- Renumbered step -->
-      <!-- Variable/Single radio buttons and Variable inputs removed -->
-      <div> <!-- Keep a div for consistency if needed, or remove if singleDist is directly in control-group -->
+      <div>
         <label for="singleDist">Distance (m):</label>
         <input type="number" id="singleDist" value="1" min="0.1" step="0.1"> <!-- Default to 1m -->
       </div>
@@ -74,7 +73,6 @@
     <div class="control-group">
       <label>2. Generate & Export:</label> <!-- Renumbered step -->
       <button id="btnGeneratePoints" disabled>Generate Points on SVG</button>
-      <!-- Export GeoJSON button removed -->
       <button id="btnExportKML" disabled>Export KML</button>
     </div>
 
@@ -86,15 +84,16 @@
       <button id="btnScaleDown" disabled>Scale Down (x0.9)</button>
     </div>
   </div>
-  
-    <!-- Dependencies -->
+
+  <!-- Dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@svgdotjs/svg.js@3.1.2/dist/svg.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@svgdotjs/svg.draggable.js@3.0.2/dist/svg.draggable.min.js"></script>
   <script src="./js/libs/svg-path-properties.js"></script> <!-- Ensure this path is correct -->
   <script src="https://cdn.jsdelivr.net/npm/tokml@0.4.0/tokml.min.js"></script>
-
-  <script>
+  
+  
+    <script> // <-- START OF SINGLE SCRIPT BLOCK
   "use strict";
 
   // --- Configuration ---
@@ -113,7 +112,7 @@
   let currentRotation = 0, currentScale = 1;
   let SvgPathPropertiesConstructor = null;
 
-  // 1️⃣ Dependency check (no changes from your previous version)
+  // 1️⃣ Dependency check
   function checkDependencies() {
     let ok = true;
     if (typeof L === 'undefined') { alert("Leaflet library (L) is missing!"); ok = false; }
@@ -139,7 +138,7 @@
     return ok;
   }
 
-  // 2️⃣ Custom SVG overlay Layer for Leaflet (no changes from your previous version)
+  // 2️⃣ Custom SVG overlay Layer for Leaflet
   const CustomSvgLayer = L.Layer.extend({
     initialize: function(svgElement, bounds, options) {
       this._svgElement = svgElement;
@@ -194,186 +193,313 @@
     L.control.scale({ imperial: false }).addTo(map);
   }
 
-  // MODIFIED updateUI to reflect removed options
   function updateUI() {
     const hasSVG = !!svgLayer && !!svgRoot && userPathElements.length > 0;
     const hasGeneratedPoints = generatedPoints.length > 0;
-
     document.getElementById('btnGeneratePoints').disabled = !hasSVG;
-    // GeoJSON button is removed, so no need to manage its state
     document.getElementById('btnExportKML').disabled = !hasSVG || !hasGeneratedPoints;
-
     ['btnRotateLeft', 'btnRotateRight', 'btnScaleUp', 'btnScaleDown']
       .forEach(id => document.getElementById(id).disabled = !hasSVG);
-
-    // Distance mode elements are removed, but singleDist input remains
     document.getElementById('singleDist').disabled = !hasSVG;
   }
 
-  // NEW function to load SVG from a predefined path
+  // Function moved earlier, before it's called
+  function onSVGUploaded(svgText) {
+    console.log("SVG Uploaded. Processing...");
+    if (svgLayer) { map.removeLayer(svgLayer); svgLayer = null; }
+    if (svgRoot) {
+        if (typeof svgRoot.off === 'function') { svgRoot.off('.draghandler'); }
+        if (svgGroup && typeof svgGroup.off === 'function') {
+            svgGroup.off('.draghandler'); svgGroup.off('.namespace');
+        }
+        svgRoot = null;
+    }
+    svgGroup = null; userPathElements = []; generatedPoints = [];
+    pointMarkers.forEach(marker => map.removeLayer(marker)); pointMarkers = [];
+    currentRotation = 0; currentScale = 1;
+
+    let parsedSVG;
+    try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(svgText, "image/svg+xml");
+        const parserError = doc.querySelector('parsererror');
+        if (parserError) { throw new Error("Invalid SVG structure: " + parserError.textContent); }
+        parsedSVG = doc.documentElement;
+        if (!parsedSVG || parsedSVG.tagName.toLowerCase() !== 'svg') { throw new Error("Not a valid <svg> root element."); }
+    } catch (error) {
+        alert(`Error parsing SVG: ${error.message}`); console.error(error); updateUI(); return;
+    }
+
+    let viewBox = parsedSVG.getAttribute('viewBox');
+    localSVGWidth = 0; localSVGHeight = 0;
+    if (viewBox) {
+        const parts = viewBox.split(/[\s,]+/);
+        if (parts.length === 4) { localSVGWidth = parseFloat(parts[2]); localSVGHeight = parseFloat(parts[3]); }
+        else { viewBox = null; }
+    }
+     if (isNaN(localSVGWidth) || localSVGWidth <= 0 || isNaN(localSVGHeight) || localSVGHeight <= 0) {
+        localSVGWidth = parseFloat(parsedSVG.getAttribute('width')) || 300;
+        localSVGHeight = parseFloat(parsedSVG.getAttribute('height')) || 300;
+         if (localSVGWidth <= 0) localSVGWidth = 300; if (localSVGHeight <= 0) localSVGHeight = 300;
+    }
+     if (!parsedSVG.getAttribute('viewBox')) { parsedSVG.setAttribute('viewBox', `0 0 ${localSVGWidth} ${localSVGHeight}`); }
+    parsedSVG.setAttribute('width', '100%'); parsedSVG.setAttribute('height', '100%');
+    parsedSVG.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    parsedSVG.style.overflow = 'visible';
+
+    const mapSize = map.getSize();
+    const initialPixelWidth = Math.min(mapSize.x * 0.6, mapSize.y * 0.6 * (localSVGWidth / localSVGHeight) , 600);
+    const initialPixelHeight = initialPixelWidth * (localSVGHeight / localSVGWidth);
+    const centerPoint = map.latLngToLayerPoint(map.getCenter());
+    const nwPoint = centerPoint.subtract([initialPixelWidth / 2, initialPixelHeight / 2]);
+    const sePoint = centerPoint.add([initialPixelWidth / 2, initialPixelHeight / 2]);
+    const initialBounds = L.latLngBounds(map.layerPointToLatLng(nwPoint), map.layerPointToLatLng(sePoint));
+
+    svgLayer = L.customSvgLayer(parsedSVG, initialBounds);
+    svgLayer.addTo(map);
+    map.fitBounds(initialBounds, { padding: [20, 20] });
+
+    svgRoot = SVG(parsedSVG);
+    if (!svgRoot) { console.error("Failed svg.js init!"); return; }
+    svgGroup = svgRoot.group().id('svg-content-group');
+    let contentMoved = false;
+    Array.from(parsedSVG.childNodes).forEach(node => {
+        if (node.nodeType === 1 && node !== svgGroup.node &&
+            !['defs', 'style', 'metadata', 'title', 'desc', 'script'].includes(node.nodeName.toLowerCase())) {
+            try { svgGroup.add(SVG(node)); contentMoved = true; } catch (e) { console.warn("Cannot add to group:", node, e); }
+        }
+    });
+     if (!contentMoved) console.warn("No content moved to group.");
+    applyTransform();
+
+    if (svgGroup && typeof svgGroup.draggable === 'function') {
+        svgGroup.draggable()
+          .on('dragstart.draghandler', e => {
+                map.dragging.disable();
+                if (e.detail && e.detail.event) L.DomEvent.stopPropagation(e.detail.event);
+                e.detail.handler.el.remember('_dragStartBounds', svgLayer.getBounds());
+                if (svgRoot && svgRoot.node) svgRoot.node.style.cursor = 'grabbing';
+          })
+          .on('dragmove.draghandler', e => {
+                if (e.detail && e.detail.event) L.DomEvent.stopPropagation(e.detail.event);
+                const startBounds = e.detail.handler.el.remember('_dragStartBounds');
+                if (!startBounds) { return; }
+                 const { x: dx, y: dy } = e.detail.delta;
+                 if (typeof dx !== 'number' || typeof dy !== 'number') { return; }
+                const nwPointStart = map.latLngToLayerPoint(startBounds.getNorthWest());
+                const sePointStart = map.latLngToLayerPoint(startBounds.getSouthEast());
+                const nwPointNew = nwPointStart.add([dx, dy]);
+                const sePointNew = sePointStart.add([dx, dy]);
+                const newBounds = L.latLngBounds(map.layerPointToLatLng(nwPointNew), map.layerPointToLatLng(sePointNew));
+                svgLayer.setBounds(newBounds);
+                 if (generatedPoints.length > 0) { drawGeneratedPoints(); }
+          })
+          .on('dragend.draghandler', e => {
+                map.dragging.enable();
+                if (e.detail && e.detail.event) L.DomEvent.stopPropagation(e.detail.event);
+                e.detail.handler.el.forget('_dragStartBounds');
+                if (svgRoot && svgRoot.node) svgRoot.node.style.cursor = 'grab';
+                if (generatedPoints.length > 0) { drawGeneratedPoints(); }
+          });
+    } else { console.error("svgGroup.draggable missing."); }
+
+    userPathElements = Array.from(svgRoot.node.querySelectorAll('path, line, polyline, polygon, rect, circle, ellipse'));
+    if (userPathElements.length === 0) { alert("Warning: No usable vector shapes found."); }
+    updateUI();
+    console.log("SVG processing complete.");
+  }
+
+
   async function loadAndProcessSVG(svgPath) {
     try {
+        console.log(`Attempting to load SVG from: ${svgPath}`);
         const response = await fetch(svgPath);
+        console.log(`Fetch response status for ${svgPath}: ${response.status}`);
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status} while fetching ${svgPath}`);
+            throw new Error(`HTTP error! status: ${response.status}`);
         }
         const svgText = await response.text();
-        onSVGUploaded(svgText); // Process the loaded SVG
+        console.log(`Successfully fetched SVG text from ${svgPath}.`);
+        // Call onSVGUploaded which is now defined in the same scope
+        onSVGUploaded(svgText);
     } catch (error) {
-        console.error("Error loading SVG from path:", error);
-        alert(`Failed to load SVG from ${svgPath}. Please check the path and ensure the file exists. \nError: ${error.message}`);
-        // Potentially update UI to reflect failure
+        console.error(`Error loading SVG from path "${svgPath}":`, error);
+        alert(`Failed to load SVG from ${svgPath}. Please check the path relative to the HTML file and ensure the file exists.\nError: ${error.message}`);
         updateUI();
     }
   }
 
-  // MODIFIED DOMContentLoaded
+  // 5️⃣ SVG Transformations (Rotate/Scale)
+  function applyTransform() {
+    if (!svgGroup) { return; }
+    svgGroup.transform({
+        rotate: currentRotation,
+        scale: currentScale,
+        origin: [localSVGWidth / 2, localSVGHeight / 2]
+    });
+    if (pointMarkers.length > 0 || generatedPoints.length > 0) {
+       drawGeneratedPoints();
+    }
+  }
+  function rotateSVG(degrees) {
+    if (!svgLayer) return;
+    currentRotation += degrees;
+    applyTransform();
+  }
+  function scaleSVG(factor) {
+    if (!svgLayer) return;
+    currentScale *= factor;
+    applyTransform();
+  }
+
+  // 6️⃣ Get Distance Parameters from UI (fixed to single mode)
+  function getDistanceParams() {
+    if (!svgLayer || !map || !svgRoot || !svgGroup || localSVGWidth <= 0) {
+        console.error("Cannot calculate distance params: Missing components.");
+        alert("Cannot calculate scale. Ensure SVG is loaded correctly.");
+        return null;
+    }
+    const mode = 'single';
+    let metersPerSvgUnit;
+    try {
+        const point1_svg = { x: 0, y: localSVGHeight / 2 };
+        const point2_svg = { x: localSVGWidth, y: localSVGHeight / 2 };
+        const point1_ll = _getTransformedLatLng(point1_svg);
+        const point2_ll = _getTransformedLatLng(point2_svg);
+        if (!point1_ll || !point2_ll) { throw new Error("Failed to transform ref points."); }
+        const mapDistanceMeters = map.distance(point1_ll, point2_ll);
+        const svgDistance = localSVGWidth;
+        if (mapDistanceMeters <= 0 || svgDistance <= 0) { throw new Error(`Invalid distances: Map=${mapDistanceMeters}m, SVG=${svgDistance}u`); }
+        metersPerSvgUnit = mapDistanceMeters / svgDistance;
+        console.log(`Calculated Scale: ${metersPerSvgUnit.toFixed(4)} m/SVG unit`);
+    } catch (error) {
+        console.error("Scale calculation error:", error);
+        alert(`Scale calculation error: ${error.message}.`);
+        return null;
+    }
+    if (!metersPerSvgUnit || metersPerSvgUnit <= 0 || !isFinite(metersPerSvgUnit)) {
+      console.error("Invalid m/SVG unit:", metersPerSvgUnit);
+      alert("Scale calculation invalid.");
+      return null;
+    }
+    let options = {};
+    try {
+        const singleMeters = parseFloat(document.getElementById('singleDist').value);
+        if (!(singleMeters > 0)) { throw new Error("Invalid distance value. Must be > 0."); }
+        options.singleDist = singleMeters / metersPerSvgUnit;
+        if (options.singleDist < 1e-6) options.singleDist = 1e-6;
+    } catch (error) {
+        alert(`Input Error: ${error.message}`); return null;
+    }
+    return { mode: mode, options: options };
+  }
+
+  // 7️⃣ Point Generation Logic
+  function _getPathDataFromElement(el) {
+    if (!el) return null; const tag = el.tagName.toLowerCase(); let d = '';
+    try { /* ... switch statement remains the same as previous ... */
+        switch (tag) {
+            case 'path': d = el.getAttribute('d') || ''; break;
+            case 'line':
+                const x1=parseFloat(el.getAttribute('x1')), y1=parseFloat(el.getAttribute('y1')), x2=parseFloat(el.getAttribute('x2')), y2=parseFloat(el.getAttribute('y2'));
+                if ([x1,y1,x2,y2].some(isNaN)) throw new Error("Invalid line coords");
+                d = `M ${x1} ${y1} L ${x2} ${y2}`; break;
+            case 'polyline': case 'polygon':
+                const pointsStr = el.getAttribute('points')?.trim(); if (!pointsStr) throw new Error("No points attr");
+                const points = pointsStr.split(/[\s,]+/); if (points.length < 2 || points.length % 2 !== 0) throw new Error("Invalid points number");
+                const coords = points.map(p => parseFloat(p)); if (coords.some(isNaN)) throw new Error("Invalid coord value");
+                d = `M ${coords[0]} ${coords[1]}`; for (let i=2; i < coords.length; i+=2) { d += ` L ${coords[i]} ${coords[i+1]}`; }
+                if (tag === 'polygon') d += ' Z'; break;
+            case 'rect':
+                const x=parseFloat(el.getAttribute('x')||'0'), y=parseFloat(el.getAttribute('y')||'0'), width=parseFloat(el.getAttribute('width')), height=parseFloat(el.getAttribute('height'));
+                if (isNaN(x)||isNaN(y)||isNaN(width)||isNaN(height)||width<=0||height<=0) throw new Error("Invalid rect attrs");
+                d = `M ${x} ${y} H ${x+width} V ${y+height} H ${x} Z`; break;
+            case 'circle':
+                const cx=parseFloat(el.getAttribute('cx')), cy=parseFloat(el.getAttribute('cy')), r=parseFloat(el.getAttribute('r'));
+                if(isNaN(cx)||isNaN(cy)||isNaN(r)||r<=0) throw new Error("Invalid circle attrs");
+                d = `M ${cx-r} ${cy} A ${r},${r} 0 1,0 ${cx+r},${cy} A ${r},${r} 0 1,0 ${cx-r},${cy} Z`; break;
+            case 'ellipse':
+                const ecx=parseFloat(el.getAttribute('cx')), ecy=parseFloat(el.getAttribute('cy')), rx=parseFloat(el.getAttribute('rx')), ry=parseFloat(el.getAttribute('ry'));
+                if(isNaN(ecx)||isNaN(ecy)||isNaN(rx)||isNaN(ry)||rx<=0||ry<=0) throw new Error("Invalid ellipse attrs");
+                d = `M ${ecx-rx},${ecy} A ${rx},${ry} 0 1,0 ${ecx+rx},${ecy} A ${rx},${ry} 0 1,0 ${ecx-rx},${ecy} Z`; break;
+            default: return null;
+        }
+        if (!d.trim()) return null; return d;
+    } catch (error) { console.warn(`Skip element ${el.id||tag}: ${error.message}`); return null; }
+  }
+
+  function _generatePointsForPath(dAttribute, mode, distanceOptions, pathProperties) {
+    const points = []; if (!dAttribute || typeof dAttribute !== 'string' || !dAttribute.trim()) { return points; }
+    try { /* ... internal logic remains the same, using singleDist ... */
+        const properties = new SvgPathPropertiesConstructor(dAttribute); const totalLength = properties.getTotalLength();
+        if (totalLength < 1e-6) { const startPoint = properties.getPointAtLength(0); if (startPoint && typeof startPoint.x === 'number') { points.push({ ...startPoint, ...pathProperties }); } return points; }
+        let currentDist = 0; points.push({ ...properties.getPointAtLength(0), ...pathProperties });
+        while (currentDist < totalLength) {
+            const step = Math.max(1e-6, distanceOptions.singleDist); currentDist += step;
+            if (currentDist < totalLength) { const nextPoint = properties.getPointAtLength(currentDist); if (nextPoint && typeof nextPoint.x === 'number') { points.push({ ...nextPoint, ...pathProperties }); } }
+            if (points.length >= MAX_POINTS_PER_PATH) { console.warn(`Max points for ${pathProperties.sourceId}`); break; }
+        }
+        const endPoint = properties.getPointAtLength(totalLength);
+        if (endPoint && typeof endPoint.x === 'number') { const lastGeneratedPoint = points[points.length - 1]; if (!lastGeneratedPoint || Math.hypot(endPoint.x - lastGeneratedPoint.x, endPoint.y - lastGeneratedPoint.y) > 1e-5) { points.push({ ...endPoint, ...pathProperties }); } }
+    } catch (error) { console.error(`Error gen points for ${pathProperties.sourceId}:`, error); return points.length > 0 ? points : []; }
+    return points;
+  }
+
+  function generatePoints() {
+    console.log("Generating points..."); if (!svgLayer || !svgRoot || userPathElements.length === 0) { alert("SVG not loaded or no vector elements."); return; }
+    const distanceParams = getDistanceParams(); if (!distanceParams) { return; }
+    generatedPoints = []; pointMarkers.forEach(marker => map.removeLayer(marker)); pointMarkers = [];
+    let totalPointsGenerated = 0, elementsProcessed = 0, elementsSkipped = 0; const allGeneratedPoints = [];
+    userPathElements.forEach((element, index) => {
+        const elementId = element.id || `(no id, index ${index})`; const elementType = element.tagName.toLowerCase(); const pathData = _getPathDataFromElement(element);
+        if (pathData) { /* ... internal logic remains the same ... */
+            const pointsForThisPath = _generatePointsForPath(pathData, distanceParams.mode, distanceParams.options, { sourceIndex: index, sourceId: elementId, sourceTag: elementType });
+            if (pointsForThisPath.length > 0) { allGeneratedPoints.push(...pointsForThisPath); totalPointsGenerated += pointsForThisPath.length; elementsProcessed++; } else { elementsProcessed++; }
+        } else { elementsSkipped++; }
+    });
+    generatedPoints = allGeneratedPoints; console.log(`Summary: Total=${totalPointsGenerated}, Processed=${elementsProcessed}, Skipped=${elementsSkipped}`);
+    if (totalPointsGenerated > 0) { drawGeneratedPoints(); alert(`Generated ${totalPointsGenerated} points from ${elementsProcessed} elements.\n(${elementsSkipped} skipped).`); } else { alert(`No points generated. Processed ${elementsProcessed}, Skipped ${elementsSkipped}.`); }
+    updateUI();
+  }
+
+  // 8️⃣ Draw Point Markers on Map
+  function _getTransformedLatLng(point) {
+    if (!svgRoot || !svgGroup || !map) { return null; } const svgElement = svgRoot.node; const groupNode = svgGroup.node; const screenCTM = groupNode.getScreenCTM(); if (!screenCTM) { return null; } const svgPoint = svgElement.createSVGPoint(); svgPoint.x = point.x; svgPoint.y = point.y; try { const transformedPoint = svgPoint.matrixTransform(screenCTM); const mapContainerRect = map.getContainer().getBoundingClientRect(); const containerX = transformedPoint.x - mapContainerRect.left; const containerY = transformedPoint.y - mapContainerRect.top; return map.containerPointToLatLng([containerX, containerY]); } catch (e) { console.error("Error transforming point:", e, point); return null; }
+  }
+
+  function drawGeneratedPoints() {
+    pointMarkers.forEach(marker => map.removeLayer(marker)); pointMarkers = []; if (!generatedPoints || generatedPoints.length === 0 || !svgGroup) { return; } let failedTransforms = 0;
+    generatedPoints.forEach((point, index) => { const latLng = _getTransformedLatLng(point); if (latLng) { const marker = L.circleMarker(latLng, POINT_MARKER_OPTIONS).bindTooltip(`Point ${index + 1}<br>Source: ${point.sourceTag} ${point.sourceId}`); marker.addTo(map); pointMarkers.push(marker); } else { failedTransforms++; } }); if (failedTransforms > 0) { console.warn(`Failed to draw ${failedTransforms} points.`); }
+  }
+
+  // 9️⃣ Export Functionality (KML only)
+  function buildDataForKML() {
+    if (!generatedPoints || generatedPoints.length === 0 || !svgGroup) { return null; } const features = [];
+    generatedPoints.forEach((point, index) => { const latLng = _getTransformedLatLng(point); if (latLng) { features.push({ name: `Point ${index + 1}`, description: `Source: ${point.sourceTag} ${point.sourceId} (SVG Coords: x=${point.x.toFixed(2)}, y=${point.y.toFixed(2)})`, geometry: { type: "Point", coordinates: [latLng.lng, latLng.lat] }, properties: { index: index + 1, sourceIndex: point.sourceIndex, sourceId: point.sourceId, sourceTag: point.sourceTag } }); } }); if (features.length === 0 && generatedPoints.length > 0) { return null; } return { type: "FeatureCollection", features: features };
+  }
+
+  function exportKML() {
+    const dataForKml = buildDataForKML(); if (!dataForKml || !dataForKml.features || dataForKml.features.length === 0) { alert("No point data available to export as KML."); return; } if (typeof tokml === 'undefined') { alert("tokml library is not loaded."); return; } try { const kmlString = tokml(dataForKml, { name: 'name', description: 'description' }); const blob = new Blob([kmlString], { type: "application/vnd.google-earth.kml+xml" }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = "svg_points.kml"; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); console.log("KML export initiated."); } catch (error) { console.error("Error during KML export:", error); alert("An error occurred while creating the KML file."); }
+  }
+
+  // Initialize after DOM is ready
   document.addEventListener('DOMContentLoaded', () => {
     if (!checkDependencies()) {
       alert("One or more required libraries are missing. Please check console.");
       return;
     }
     initMap();
-
-    // --- Load SVG automatically ---
-    loadAndProcessSVG(SVG_PATH_TO_LOAD);
-
-    // --- Button listeners (GeoJSON export listener removed) ---
+    loadAndProcessSVG(SVG_PATH_TO_LOAD); // Load the default SVG
+    // Setup button listeners
     document.getElementById('btnGeneratePoints').addEventListener('click', generatePoints);
     document.getElementById('btnExportKML').addEventListener('click', exportKML);
     document.getElementById('btnRotateLeft').addEventListener('click', () => rotateSVG(-10));
     document.getElementById('btnRotateRight').addEventListener('click', () => rotateSVG(10));
     document.getElementById('btnScaleUp').addEventListener('click', () => scaleSVG(1.1));
     document.getElementById('btnScaleDown').addEventListener('click', () => scaleSVG(0.9));
-
-    // Radio button listeners for distance mode are removed as mode is fixed.
-    // No need for event listener on singleDist input unless you want real-time updates,
-    // its value is read when 'Generate Points' is clicked.
-
-    updateUI(); // Initial UI state
+    updateUI(); // Set initial UI state
   });
-  </script>
-  <script>
-  // Separating remaining JS logic into another script block
-  
-    // 8️⃣ Draw Point Markers on Map
-  // _getTransformedLatLng (no changes from your previous version)
-  function _getTransformedLatLng(point) {
-      if (!svgRoot || !svgGroup || !map) { return null; }
-      const svgElement = svgRoot.node; const groupNode = svgGroup.node;
-      const screenCTM = groupNode.getScreenCTM();
-      if (!screenCTM) { console.error("No Screen CTM from group."); return null; }
-      const svgPoint = svgElement.createSVGPoint();
-      svgPoint.x = point.x; svgPoint.y = point.y;
-      try {
-          const transformedPoint = svgPoint.matrixTransform(screenCTM);
-          const mapContainerRect = map.getContainer().getBoundingClientRect();
-          const containerX = transformedPoint.x - mapContainerRect.left;
-          const containerY = transformedPoint.y - mapContainerRect.top;
-          return map.containerPointToLatLng([containerX, containerY]);
-      } catch (e) { console.error("Error transforming point:", e, point); return null; }
-  }
 
-  // drawGeneratedPoints (no changes from your previous version)
-  function drawGeneratedPoints() {
-      pointMarkers.forEach(marker => map.removeLayer(marker)); pointMarkers = [];
-      if (!generatedPoints || generatedPoints.length === 0) { return; }
-      if (!svgGroup) { return; }
-      let failedTransforms = 0;
-      generatedPoints.forEach((point, index) => {
-          const latLng = _getTransformedLatLng(point);
-          if (latLng) {
-              const marker = L.circleMarker(latLng, POINT_MARKER_OPTIONS)
-                  .bindTooltip(`Point ${index + 1}<br>Source: ${point.sourceTag} ${point.sourceId}`);
-              marker.addTo(map); pointMarkers.push(marker);
-          } else { failedTransforms++; }
-      });
-      if (failedTransforms > 0) { console.warn(`Failed to draw ${failedTransforms} points.`); }
-  }
-
-  // 9️⃣ Export Functionality (KML only)
-  // buildGeoJSON (REMOVED - Not strictly needed for KML if tokml handles properties directly,
-  // but tokml typically expects GeoJSON. Let's build a simplified internal structure for KML properties)
-
-  // Function to build data structure for KML (simpler than full GeoJSON if only for KML)
-  function buildDataForKML() {
-    if (!generatedPoints || generatedPoints.length === 0) { return null; }
-    if (!svgGroup) { return null; }
-
-    const features = [];
-    generatedPoints.forEach((point, index) => {
-        const latLng = _getTransformedLatLng(point);
-        if (latLng) {
-            features.push({
-                // These are properties tokml will look for based on options
-                name: `Point ${index + 1}`,
-                description: `Source: ${point.sourceTag} ${point.sourceId} (SVG Coords: x=${point.x.toFixed(2)}, y=${point.y.toFixed(2)})`,
-                // Geometry needs to be structured for tokml, even if not full GeoJSON
-                geometry: {
-                    type: "Point",
-                    coordinates: [latLng.lng, latLng.lat]
-                },
-                // Keep original properties if needed for KML extended data
-                properties: { // This 'properties' sub-object is what tokml maps
-                    index: index + 1,
-                    sourceIndex: point.sourceIndex,
-                    sourceId: point.sourceId,
-                    sourceTag: point.sourceTag
-                }
-            });
-        }
-    });
-    if (features.length === 0 && generatedPoints.length > 0) { return null; }
-    // tokml expects a GeoJSON-like FeatureCollection structure
-    return { type: "FeatureCollection", features: features };
-  }
-
-
-  // GeoJSON export function REMOVED:
-  // function exportGeoJSON() { /* ... */ }
-
-
-  // MODIFIED Triggers download of the generated points as a KML file
-  function exportKML() {
-    // Use the new helper function to build data structure
-    const dataForKml = buildDataForKML();
-     if (!dataForKml || !dataForKml.features || dataForKml.features.length === 0) {
-      alert("No point data available to export as KML.");
-      return;
-    }
-
-    if (typeof tokml === 'undefined') {
-         alert("tokml library is not loaded. Cannot export KML.");
-         return;
-     }
-
-    try {
-        // Convert data to KML using tokml library
-        // We'll tell tokml to look for 'name' and 'description' at the top level of each feature
-        const kmlString = tokml(dataForKml, {
-            name: 'name',
-            description: 'description',
-            // If you want to include all properties from the 'properties' sub-object
-            // into <ExtendedData>, you might need to adjust or use a different tokml option
-            // or ensure your 'description' concatenates what you need.
-            // For simplicity, 'name' and 'description' are directly mapped here.
-        });
-
-        const blob = new Blob([kmlString], { type: "application/vnd.google-earth.kml+xml" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = "svg_points.kml";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        console.log("KML export initiated.");
-    } catch (error) {
-         console.error("Error during KML export:", error);
-         alert("An error occurred while creating the KML file.");
-    }
-  }
-  </script>
-</body>
+  </script> 
+  </body>
 </html>
