@@ -701,7 +701,7 @@
     placemarksData.forEach(p => {
       kmlContent +=
 `      <Placemark>\n` +
-`        <name>Point ${p.index}</name>\n` +
+`        <name>${p.index}</name>\n` +
 `        <description>Source Element ID: ${p.sourceId}, Type: ${p.sourceTag}</description>\n` +
 `        <Point>\n` +
 `          <coordinates>${p.lon},${p.lat},0</coordinates>\n` + // lon,lat,altitude
