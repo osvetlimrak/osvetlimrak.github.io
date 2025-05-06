@@ -465,6 +465,7 @@
 
   // 🔟 Export Functionality (KML only - buildDataForKML, exportKML - no changes)
     // Function to build data structure for KML (simpler than full GeoJSON if only for KML)
+    // Function to build data structure for KML (MODIFIED for desired description)
   function buildDataForKML() {
     if (!generatedPoints || generatedPoints.length === 0) { return null; }
     if (!svgGroup) { return null; }
@@ -473,27 +474,26 @@
     generatedPoints.forEach((point, index) => {
         const latLng = _getTransformedLatLng(point);
         if (latLng) {
-            features.push({
-                // These are properties tokml will look for based on options
-                name: (index + 1).toString(), // MODIFIED: Just the number
-                description: `Source: ${point.sourceTag} ${point.sourceId} (SVG Coords: x=${point.x.toFixed(2)}, y=${point.y.toFixed(2)})`,
-                // Geometry needs to be structured for tokml, even if not full GeoJSON
+            // Create the feature object that tokml will process
+            const feature = {
+                // Set 'name' property - tokml maps this to KML <name>
+                name: (index + 1).toString(), // Keep name as the number (or change to "Point N" if preferred)
+
+                // Set 'description' property - tokml maps this to KML <description>
+                description: (index + 1).toString(), // *** THIS IS THE KEY CHANGE ***
+
+                // Geometry is still required by tokml
                 geometry: {
                     type: "Point",
                     coordinates: [latLng.lng, latLng.lat]
-                },
-                // Keep original properties if needed for KML extended data
-                properties: { // This 'properties' sub-object is what tokml maps
-                    index: index + 1,
-                    sourceIndex: point.sourceIndex,
-                    sourceId: point.sourceId,
-                    sourceTag: point.sourceTag
-                }
-            });
+            };
+            features.push(feature);
         }
     });
+
     if (features.length === 0 && generatedPoints.length > 0) { return null; }
-    // tokml expects a GeoJSON-like FeatureCollection structure
+
+    // Return the FeatureCollection structure tokml expects
     return { type: "FeatureCollection", features: features };
   }
   function exportKML() { /* ... */ }
