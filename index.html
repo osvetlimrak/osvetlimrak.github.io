@@ -543,22 +543,34 @@
   }
 
   function exportKML() {
-    const data = buildDataForKML();
-    if(!data||!data.features.length){
-      return alert("No point data to export.");
-    }
-    const kmlStr = tokml(data,{ name:'name', description:'description' });
-    const blob = new Blob([kmlStr],{ type:"application/vnd.google-earth.kml+xml" });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement("a");
-    a.href     = url;
-    a.download = "svg_points.kml";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    console.log("KML export complete.");
+  // 1) Get the GeoJSON
+  const data = buildDataForKML();
+  if (!data || !data.features.length) {
+    return alert("No point data to export.");
   }
+
+  // 2) Convert to KML
+  const kmlString = tokml(data, {
+    name:        'name',
+    description: 'description'
+  });
+
+  // 3) Download
+  const blob = new Blob([kmlString], {
+    type: "application/vnd.google-earth.kml+xml"
+  });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href     = url;
+  a.download = "svg_points.kml";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  console.log("KML export complete.");
+}
+
 
   // Init everything
   document.addEventListener('DOMContentLoaded',()=>{
