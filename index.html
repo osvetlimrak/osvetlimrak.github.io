@@ -528,38 +528,79 @@
     if(fail) console.warn(`Failed to draw ${fail} points.`);
   }
 
-  // 🔟 Build GeoJSON + KML export
-  function buildDataForKML() {
-  if (!generatedPoints.length) return null;
-
-  const features = generatedPoints.map((pt, i) => {
-    const ll = _getTransformedLatLng(pt);
-    return {
-      type: "Feature",   // crucial for GeoJSON compliance
-      properties: {      // tokml will read name/description here
-        name: (i + 1).toString(),
-        description: `Source: ${pt.sourceTag} ${pt.sourceId}
-                      (SVG x=${pt.x.toFixed(2)}, y=${pt.y.toFixed(2)})`
-      },
-      geometry: {
-        type: "Point",
-        coordinates: [ll.lng, ll.lat]
-      }
-    };
-  });
-
-  return {
-    type: "FeatureCollection",
-    features: features
-  };
+  /**
+ * Builds an array of simple placemark objects from generatedPoints.
+ * Each object contains exactly the fields your Python version used.
+ */
+function buildPlacemarks() {
+  return generatedPoints
+    .map((pt, i) => {
+      // Transform the SVG‐space point into lat/lng
+      const ll = _getTransformedLatLng(pt);
+      if (!ll) return null;
+      return {
+        index:       i,
+        lon:         ll.lng,
+        lat:         ll.lat,
+        sourceId:    pt.sourceId || "",
+        sourceTag:   pt.sourceTag || ""
+      };
+    })
+    .filter(p => p !== null);
 }
 
 
-  function exportKML() {
-  const data = buildDataForKML();
-  if (!data) {
+/**
+ * Exports the current set of generatedPoints as a KML file,
+ * complete with Schema, Folder, and numbered Placemark entries.
+ */
+function exportKML() {
+  const placemarks = buildPlacemarks();
+  if (placemarks.length === 0) {
     return alert("No point data to export.");
   }
+
+  // 1) KML Header + Schema
+  let kml = `<?xml version="1.0" encoding="utf-8"?>\n` +
+            `<kml xmlns="http://www.opengis.net/kml/2.2">\n` +
+            `<Document id="root_doc">\n` +
+            `  <Schema name="svg_points" id="svg_points">\n` +
+            `    <SimpleField name="Name" type="string"></SimpleField>\n` +
+            `    <SimpleField name="Description" type="string"></SimpleField>\n` +
+            `  </Schema>\n` +
+            `  <Folder>\n` +
+            `    <name>svg_points</name>\n`;
+
+  // 2) One <Placemark> per point
+  placemarks.forEach(p => {
+    kml +=
+`    <Placemark>
+      <name>${p.index}</name>
+      <description>${p.index}</description>
+      <Point>
+        <coordinates>${p.lon},${p.lat},0</coordinates>
+      </Point>
+    </Placemark>
+`;
+  });
+
+  // 3) Close Folder + Document + kml
+  kml += `  </Folder>\n</Document>\n</kml>`;
+
+  // 4) Trigger download in browser
+  const blob = new Blob([kml], { type: "application/vnd.google-earth.kml+xml" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href     = url;
+  a.download = "svg_points.kml";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  console.log(`KML export complete: ${placemarks.length} placemarks.`);
+}
+
 
   // Debug: inspect your GeoJSON structure
   console.log("GeoJSON for KML:", data);
