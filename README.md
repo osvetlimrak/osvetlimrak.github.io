@@ -7,7 +7,7 @@ Te pozicije kasnije možete lako uvesti u **Google My Maps** kako bi svako znao 
 
 ## Pristup alatu
 
-Alatu pristupate putem [ovog linka)](https://osvetlimrak.github.io/) .  
+Alatu pristupate putem [ovog linka](https://osvetlimrak.github.io/) .  
 
 ---
 
