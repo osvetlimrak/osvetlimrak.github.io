@@ -530,32 +530,47 @@
 
   // 🔟 Build GeoJSON + KML export
   function buildDataForKML() {
-    if(!generatedPoints.length) return null;
-    const feats = generatedPoints.map((pt,i)=>{
-      const ll = _getTransformedLatLng(pt);
-      return {
-        name: (i+1).toString(),
-        description: `Source: ${pt.sourceTag} ${pt.sourceId} (SVG x=${pt.x.toFixed(2)},y=${pt.y.toFixed(2)})`,
-        geometry: { type:"Point", coordinates:[ll.lng,ll.lat] }
-      };
-    });
-    return { type:"FeatureCollection", features:feats };
-  }
+  if (!generatedPoints.length) return null;
+
+  const features = generatedPoints.map((pt, i) => {
+    const ll = _getTransformedLatLng(pt);
+    return {
+      type: "Feature",   // crucial for GeoJSON compliance
+      properties: {      // tokml will read name/description here
+        name: (i + 1).toString(),
+        description: `Source: ${pt.sourceTag} ${pt.sourceId}
+                      (SVG x=${pt.x.toFixed(2)}, y=${pt.y.toFixed(2)})`
+      },
+      geometry: {
+        type: "Point",
+        coordinates: [ll.lng, ll.lat]
+      }
+    };
+  });
+
+  return {
+    type: "FeatureCollection",
+    features: features
+  };
+}
+
 
   function exportKML() {
-  // 1) Get the GeoJSON
   const data = buildDataForKML();
-  if (!data || !data.features.length) {
+  if (!data) {
     return alert("No point data to export.");
   }
 
-  // 2) Convert to KML
+  // Debug: inspect your GeoJSON structure
+  console.log("GeoJSON for KML:", data);
+
+  // Map GeoJSON → KML, using properties.name/description
   const kmlString = tokml(data, {
     name:        'name',
     description: 'description'
   });
 
-  // 3) Download
+  // Standard download logic
   const blob = new Blob([kmlString], {
     type: "application/vnd.google-earth.kml+xml"
   });
@@ -568,8 +583,9 @@
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 
-  console.log("KML export complete.");
+  console.log("KML export complete with", data.features.length, "features.");
 }
+
 
 
   // Init everything
