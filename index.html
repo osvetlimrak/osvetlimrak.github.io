@@ -464,7 +464,38 @@
 
 
   // 🔟 Export Functionality (KML only - buildDataForKML, exportKML - no changes)
-  function buildDataForKML() { /* ... */ }
+    // Function to build data structure for KML (simpler than full GeoJSON if only for KML)
+  function buildDataForKML() {
+    if (!generatedPoints || generatedPoints.length === 0) { return null; }
+    if (!svgGroup) { return null; }
+
+    const features = [];
+    generatedPoints.forEach((point, index) => {
+        const latLng = _getTransformedLatLng(point);
+        if (latLng) {
+            features.push({
+                // These are properties tokml will look for based on options
+                name: (index + 1).toString(), // MODIFIED: Just the number
+                description: `Source: ${point.sourceTag} ${point.sourceId} (SVG Coords: x=${point.x.toFixed(2)}, y=${point.y.toFixed(2)})`,
+                // Geometry needs to be structured for tokml, even if not full GeoJSON
+                geometry: {
+                    type: "Point",
+                    coordinates: [latLng.lng, latLng.lat]
+                },
+                // Keep original properties if needed for KML extended data
+                properties: { // This 'properties' sub-object is what tokml maps
+                    index: index + 1,
+                    sourceIndex: point.sourceIndex,
+                    sourceId: point.sourceId,
+                    sourceTag: point.sourceTag
+                }
+            });
+        }
+    });
+    if (features.length === 0 && generatedPoints.length > 0) { return null; }
+    // tokml expects a GeoJSON-like FeatureCollection structure
+    return { type: "FeatureCollection", features: features };
+  }
   function exportKML() { /* ... */ }
    // Explicitly copy implementation from previous working version
    buildDataForKML = function() {
