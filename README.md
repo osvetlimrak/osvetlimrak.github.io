@@ -79,17 +79,11 @@ Ponovite dok oblik ne bude orijentisan kako želite.
 1. Otvorite **[Google My Maps](https://www.google.com/mymaps)** i prijavite se svojim Google nalogom.  
 2. Kliknite **`+ CREATE A NEW MAP`**.  
 
-![Dugme za novu mapu](https://i.imgur.com/s0YwQZk.png)
-
 3. Imenujte mapu: kliknite na **“Untitled map”** u gornjem levom uglu i unesite, *npr.* **“Performans 11:52 – Lokacija X”**.
-
-![Promena naziva mape](https://i.imgur.com/d3rW0W7.png)
 
 4. **Uvoz KML fajla**
 
    * U levom panelu, ispod naziva sloja (*“Untitled layer”*), kliknite **`Import`**.  
-
-     ![Dugme Import](https://i.imgur.com/9qY9vE7.png)
 
    * U prozoru **“Choose a file to import”**:
      * Prevucite **`svg_points.kml`** u prozor **ili**
