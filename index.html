@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <title>SVG Overlay Point Generator</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- ADDED: Leaflet Control Geocoder CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
   <style>
     html, body {
       margin: 0; padding: 0;
@@ -46,6 +48,11 @@
     }
     .my-svg-layer svg:active { cursor: grabbing; }
     #svg-content-group {}
+
+    /* Optional: Style the geocoder for better fit if needed */
+    .leaflet-control-geocoder-form input {
+        min-width: 200px; /* Or whatever width you prefer */
+    }
   </style>
 </head>
 <body>
@@ -84,9 +91,11 @@
 
   <!-- Dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- ADDED: Leaflet Control Geocoder JS -->
+  <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@svgdotjs/svg.js@3.1.2/dist/svg.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@svgdotjs/svg.draggable.js@3.0.2/dist/svg.draggable.min.js"></script>
-  <script src="./js/libs/svg-path-properties.js"></script>
+  <script src="./js/libs/svg-path-properties.js"></script> <!-- Assuming this is correctly pathed locally -->
   <script src="https://cdn.jsdelivr.net/npm/tokml@0.4.0/tokml.min.js"></script>
 
   <script>
@@ -110,6 +119,10 @@
   function checkDependencies() {
     let ok = true;
     if (typeof L === 'undefined')    { console.error("Leaflet (L) missing!"); ok = false; }
+    // MODIFIED: Added check for Leaflet Control Geocoder
+    if (typeof L.Control === 'undefined' || typeof L.Control.Geocoder === 'undefined') {
+        console.error("Leaflet Control Geocoder missing!"); ok = false;
+    }
     if (typeof SVG === 'undefined')  { console.error("svg.js (SVG) missing!"); ok = false; }
     if (SVG.extend && SVG.Element && typeof SVG.Element.prototype.draggable === 'undefined') { // Check draggable correctly
       console.error("svg.draggable.js missing or not loaded correctly!"); ok = false;
@@ -177,6 +190,30 @@
       maxZoom:19, attribution:'© OSM contributors'
     }).addTo(map);
     L.control.scale({ imperial:false }).addTo(map);
+
+    // MODIFIED: Initialize and add Geocoder control
+    L.Control.geocoder({
+        defaultMarkGeocode: true, // true to add a marker, false to just pan/zoom
+        placeholder: "Search for a place...",
+        errorMessage: "Nothing found.",
+        geocoder: L.Control.Geocoder.nominatim({
+            // Optional: You can provide specific Nominatim parameters if needed
+            // geocodingQueryParams: { countrycodes: 'us' } // e.g., limit to US
+        })
+    })
+    .on('markgeocode', function(e) {
+      // When a geocode result is selected
+      var bbox = e.geocode.bbox;
+      var poly = L.polygon([
+        bbox.getSouthEast(),
+        bbox.getNorthEast(),
+        bbox.getNorthWest(),
+        bbox.getSouthWest()
+      ]);
+      map.fitBounds(poly.getBounds());
+      // You could also just do: map.setView(e.geocode.center, map.getZoom() > 15 ? map.getZoom() : 15);
+    })
+    .addTo(map);
   }
 
   function updateUI() {
@@ -289,13 +326,6 @@
 
       const mapDistance = map.distance(latLng1, latLng2); // meters
 
-      // The distance in SVG units is localSVGWidth (since y is the same)
-      // If currentScale is not 1, this needs to be accounted for.
-      // The actual SVG distance currently on map is localSVGWidth * currentScale
-      // However, we want meters per ORIGINAL SVG unit.
-      // The points _getTransformedLatLng are already scaled and rotated.
-      // So mapDistance corresponds to localSVGWidth on the original SVG.
-
       if (localSVGWidth <= 0) throw new Error("localSVGWidth is zero or negative.");
       mpsu = mapDistance / localSVGWidth;
 
@@ -310,9 +340,6 @@
       alert("Please enter a positive distance value for point spacing.");
       return null;
     }
-    // We need the spacing in original SVG units.
-    // If 1 SVG unit = mpsu meters, then X SVG units = meters
-    // X = meters / mpsu
     const svgSpacing = meters / mpsu;
 
     return { mode:'single', options:{ singleDist: Math.max(1e-6, svgSpacing) } };
@@ -353,7 +380,6 @@
           const cx=+el.getAttribute('cx'),cy=+el.getAttribute('cy'),
                 r=+el.getAttribute('r');
           if ([cx,cy,r].some(isNaN) || r<=0) throw "Invalid circle parameters";
-          // Approximate circle with path (SVGPathProperties works best with M, L, C, S, Q, T, A)
           d = `M ${cx-r} ${cy} A ${r},${r} 0 1,0 ${cx+r},${cy} A ${r},${r} 0 1,0 ${cx-r},${cy} Z`;
           break;
         case 'ellipse':
@@ -382,18 +408,17 @@
       const prop = new SvgPathPropertiesConstructor(dAttr);
       const len  = prop.getTotalLength();
 
-      if (len<1e-6) { // Path has negligible length
+      if (len<1e-6) {
         const p0=prop.getPointAtLength(0);
         if(p0) pts.push({...p0,...props});
         return pts;
       }
 
       let currentDist = 0;
-      // Add the start point
       const startPoint = prop.getPointAtLength(0);
       if (startPoint) pts.push({...startPoint, ...props});
 
-      currentDist += opts.singleDist; // opts.singleDist is in SVG units
+      currentDist += opts.singleDist;
 
       while(currentDist < len) {
         const p=prop.getPointAtLength(currentDist);
@@ -405,7 +430,6 @@
         currentDist += opts.singleDist;
       }
 
-      // Add the end point if it's not too close to the last generated point
       const endPoint = prop.getPointAtLength(len);
       if (endPoint) {
           const lastGeneratedPoint = pts[pts.length - 1];
@@ -426,7 +450,7 @@
     if(!svgLayer||!svgRoot||!userPathElements.length) {
       return alert("SVG not placed or no vector elements found in the SVG.");
     }
-    const p = getDistanceParams(); // p.options.singleDist is in SVG units
+    const p = getDistanceParams();
     if(!p) return;
 
     generatedPoints=[];
@@ -467,43 +491,38 @@
       return alert("SVG data not ready or failed to load.");
     }
     if(svgLayer){ map.removeLayer(svgLayer); svgLayer=null; }
-    if(svgRoot){ svgRoot.remove(); svgRoot=null; svgGroup=null; } // Use svg.js remove
+    if(svgRoot){ svgRoot.remove(); svgRoot=null; svgGroup=null; }
 
     userPathElements=[]; generatedPoints=[]; pointMarkers.forEach(m=>map.removeLayer(m)); pointMarkers=[];
     currentRotation=0; currentScale=1;
 
-    // Create a temporary div to parse SVG and attach to svg.js
     const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = loadedSvgText; // Use innerHTML to parse the string
+    tempDiv.innerHTML = loadedSvgText;
     const parsedSVGElement = tempDiv.querySelector('svg');
 
     if (!parsedSVGElement) {
         return alert("Failed to parse SVG string into an SVG element.");
     }
 
-    // Ensure viewBox is set for consistent scaling by svg.js and transformations
     if (!parsedSVGElement.getAttribute('viewBox')) {
         parsedSVGElement.setAttribute('viewBox', `0 0 ${localSVGWidth} ${localSVGHeight}`);
     }
     parsedSVGElement.setAttribute('width','100%');
     parsedSVGElement.setAttribute('height','100%');
     parsedSVGElement.setAttribute('preserveAspectRatio','xMidYMid meet');
-    // parsedSVGElement.style.overflow = 'visible'; // already set in CSS
 
     const center  = map.getCenter();
     const zoom    = map.getZoom();
     const mapSize = map.getSize();
 
-    // Initial placement size calculation (heuristic)
     const aspectRatio = localSVGWidth / localSVGHeight;
     let initialPixelWidth = Math.min(mapSize.x * 0.5, mapSize.y * 0.5 * aspectRatio, 600);
     let initialPixelHeight = initialPixelWidth / aspectRatio;
 
-    if (aspectRatio < 1) { // Taller than wide
+    if (aspectRatio < 1) {
         initialPixelHeight = Math.min(mapSize.y * 0.5, mapSize.x * 0.5 / aspectRatio, 600);
         initialPixelWidth = initialPixelHeight * aspectRatio;
     }
-
 
     const centerPx     = map.project(center,zoom);
     const nwPx    = centerPx.subtract([initialPixelWidth/2, initialPixelHeight/2]);
@@ -514,11 +533,9 @@
     );
 
     svgLayer = L.customSvgLayer(parsedSVGElement, bounds).addTo(map);
-    svgRoot  = SVG(parsedSVGElement); // Attach svg.js to the element *after* it's in the DOM via Leaflet layer
+    svgRoot  = SVG(parsedSVGElement);
     svgGroup = svgRoot.group().id('svg-content-group');
 
-
-    // Move all top-level children (except defs, etc.) into the group
     const childrenToMove = [];
     svgRoot.each(function(i, children) {
         if (this.node !== svgGroup.node &&
@@ -527,7 +544,7 @@
             this.type !== 'style' && this.type !== 'script') {
             childrenToMove.push(this);
         }
-    }, true); // true for deep
+    }, true);
 
 
     childrenToMove.forEach(child => {
@@ -538,24 +555,20 @@
         }
     });
 
+    applyTransform();
 
-    applyTransform(); // Apply initial transform (identity if no rotation/scale yet)
-
-    if(svgGroup.draggable && typeof svgGroup.draggable === 'function'){ // Check if draggable is a function
+    if(svgGroup.draggable && typeof svgGroup.draggable === 'function'){
       svgGroup.draggable()
-        .on('dragstart.namespace', e => { // Use namespace for events
+        .on('dragstart.namespace', e => {
           map.dragging.disable();
-          // Store the initial bounds of the Leaflet layer, not the SVG group
           e.detail.handler.el.remember('_initialLayerBounds', svgLayer.getBounds());
         })
         .on('dragmove.namespace', e => {
           const initialLayerBounds = e.detail.handler.el.remember('_initialLayerBounds');
           if(!initialLayerBounds) return;
 
-          const {x:dx,y:dy} = e.detail.delta; // Delta in screen pixels
+          const {x:dx,y:dy} = e.detail.delta;
 
-          // Convert delta to LatLng offset. This is tricky because pixel size changes with zoom.
-          // A simpler approach for Leaflet is to move the layer bounds directly.
           const nwOld = map.latLngToLayerPoint(initialLayerBounds.getNorthWest());
           const seOld = map.latLngToLayerPoint(initialLayerBounds.getSouthEast());
 
@@ -572,7 +585,7 @@
         .on('dragend.namespace', e => {
           map.dragging.enable();
           e.detail.handler.el.forget('_initialLayerBounds');
-          if(generatedPoints.length) drawGeneratedPoints(); // Redraw with final position
+          if(generatedPoints.length) drawGeneratedPoints();
         });
     } else {
         console.warn("SVG.draggable is not available on svgGroup.");
@@ -585,52 +598,27 @@
   }
 
   // 9️⃣ Draw point markers
-  function _getTransformedLatLng(svgPoint) { // svgPoint is {x, y} in original SVG coordinates
+  function _getTransformedLatLng(svgPoint) {
     if(!svgRoot || !svgGroup || !map || !svgLayer) return null;
 
-    // Get the SVG element itself, which is managed by the Leaflet layer
     const svgElement = svgLayer._svgElement;
     if (!svgElement) return null;
 
-    // Create an SVGPoint in the SVG's coordinate system
     const pt = svgElement.createSVGPoint();
     pt.x = svgPoint.x;
     pt.y = svgPoint.y;
 
-    // Get the CTM of the <g> element (which has scale/rotate)
-    // and then the CTM of the <svg> element itself (which handles position/zoom by Leaflet)
-    const groupCTM = svgGroup.node.getCTM(); // Transformation of the group relative to <svg>
-    const svgCTM = svgElement.getScreenCTM(); // Transformation of <svg> relative to screen
+    const groupCTM = svgGroup.node.getCTM();
+    const svgCTM = svgElement.getScreenCTM();
 
     if (!groupCTM || !svgCTM) {
         console.warn("Could not get CTM for point transformation.");
         return null;
     }
-
-    // Transform point by group's transform first
-    let transformedPoint = pt.matrixTransform(groupCTM);
-
-    // Now, this transformedPoint is in the coordinate system of the <svg> element.
-    // We need to map this to a layer point relative to the map container.
-    // The svgElement's top-left is positioned by Leaflet.
-    const svgRect = svgElement.getBoundingClientRect(); // Position of <svg> on screen
-    const mapContainerRect = map.getContainer().getBoundingClientRect(); // Position of map on screen
-
-    // Point's screen coordinates:
-    // svgRect.left is where the SVG's 0,0 is on the screen.
-    // transformedPoint.x is offset from SVG's 0,0 (scaled by svgElement's width/height % if preserveAspectRatio is on)
-    // This needs careful handling of how svg.js and Leaflet scale/position.
-
-    // Let's use svgElement.getScreenCTM() which should give the full transform from SVG content to screen.
-    // The svgPoint needs to be transformed by the g element's CTM, THEN by the SVG element's CTM
-    // if we were to directly use SVG DOM methods.
-    // However, svg.js's svgRoot.node.getScreenCTM() might be what we want if svgRoot is the <svg> tag
-    // and svgGroup is inside it.
-    // The `svgGroup.node.getScreenCTM()` should give the transform from `svgGroup`'s coordinate space to screen space.
+    
     const screenPoint = pt.matrixTransform(svgGroup.node.getScreenCTM());
-
-    // The screenPoint is now in absolute screen coordinates.
-    // We need to convert it to coordinates relative to the map container.
+    
+    const mapContainerRect = map.getContainer().getBoundingClientRect();
     const containerX = screenPoint.x - mapContainerRect.left;
     const containerY = screenPoint.y - mapContainerRect.top;
 
@@ -644,7 +632,7 @@
     let failedDraws = 0;
 
     generatedPoints.forEach((pt,i)=>{
-      const ll = _getTransformedLatLng(pt); // pt is {x, y} in original SVG coords
+      const ll = _getTransformedLatLng(pt);
       if(ll){
         const mk = L.circleMarker(ll,POINT_MARKER_OPTIONS)
           .bindTooltip(`Point ${i+1}<br>Source: ${pt.sourceTag} ${pt.sourceId}`);
@@ -665,13 +653,13 @@
   function buildPlacemarks() {
     return generatedPoints
       .map((pt, i) => {
-        const ll = _getTransformedLatLng(pt); // pt is {x, y} in original SVG coords
+        const ll = _getTransformedLatLng(pt);
         if (!ll) {
             console.warn(`Could not get LatLng for point index ${i} (source: ${pt.sourceId}). Skipping in KML.`);
             return null;
         }
         return {
-          index:       i + 1, // KML points usually 1-indexed for names
+          index:       i + 1,
           lon:         ll.lng,
           lat:         ll.lat,
           sourceId:    pt.sourceId || "unknown",
@@ -704,7 +692,7 @@
 `        <name>${p.index}</name>\n` +
 `        <description>Source Element ID: ${p.sourceId}, Type: ${p.sourceTag}</description>\n` +
 `        <Point>\n` +
-`          <coordinates>${p.lon},${p.lat},0</coordinates>\n` + // lon,lat,altitude
+`          <coordinates>${p.lon},${p.lat},0</coordinates>\n` +
 `        </Point>\n` +
 `      </Placemark>\n`;
     });
@@ -730,7 +718,6 @@
   // Init everything
   document.addEventListener('DOMContentLoaded',()=>{
     if(!checkDependencies()){
-      // Alert already shown in checkDependencies
       return;
     }
     initMap();
